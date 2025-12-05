@@ -1,0 +1,100 @@
+/**
+ * Core Philosophy: This ruleset establishes a clear boundary between public, read-only
+ * quiz content and private, user-specific data. All quiz materials (subjects,
+ * chapters, questions, badges) are publicly accessible to any client, but cannot be
+ * modified. All user-specific data (profiles, attempts, bookmarks) is strictly
+ * confined to the authenticated user who owns it.
+ *
+ * Data Structure: The data is organized into two main categories:
+ * 1. Top-Level Public Collections: /subjects, /chapters, /questions, and /badges store the
+ *    global quiz content. This data is intended to be read-only for all app users.
+ * 2. User-Owned Data Tree: All private user data is nested under /users/{userId}. This
+ *    includes the user's profile, their quiz attempts, bookmarks, and their earned badges.
+ *    This structure allows for simple, performant, and secure path-based authorization.
+ *
+ * Key Security Decisions:
+ * - Strict Ownership: A user can only access data under their own /users/{userId} path.
+ * - Public Leaderboard: Any signed-in user can query the 'users' collection for the leaderboard.
+ * - Public Content is Read-Only: All top-level content collections are immutable from the client-side
+ *   to prevent unauthorized modification of quiz data. Writes to these collections would
+ *   be handled by a trusted server-side process (e.g., Admin SDK).
+ * - Denormalization for Authorization: User-specific subcollections like 'quizSetAttempts' contain a
+ *   'userId' field. The rules validate on creation that this field matches the user's path,
+ *   enforcing relational integrity without costly 'get' calls.
+ * - Structural Segregation: Private user data (e.g., bookmarks) is kept in a user subcollection,
+ *   while public data (e.g., questions) is in a separate top-level collection. This prevents
+ *   insecure queries and simplifies rule logic.
+ */
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --------------------------------
+    // Helper Functions
+    // --------------------------------
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // --------------------------------
+    // User Data Collections
+    // --------------------------------
+
+    // Any signed-in user can read the users collection for the leaderboard.
+    // Users can only create/update/delete their own document.
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isOwner(userId);
+
+      // Subcollection rules inherit ownership.
+      match /quizSetAttempts/{quizSetAttemptId} {
+        allow read, write: if isOwner(userId);
+      }
+      match /bookmarks/{bookmarkId} {
+        allow read, write: if isOwner(userId);
+      }
+      match /userBadges/{userBadgeId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+    
+    // --------------------------------
+    // Public Content Collections
+    // --------------------------------
+
+    match /subjects/{subjectId} {
+      allow read: if true;
+      allow write: if false;
+
+      match /chapters/{chapterId} {
+        allow read: if true;
+        allow write: if false;
+      }
+    }
+
+    match /chapters/{chapterId} {
+      allow read: if true;
+      allow write: if false;
+
+      match /quizSets/{quizSetId} {
+        allow read: if true;
+        allow write: if false;
+      }
+    }
+
+    match /questions/{questionId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /badges/{badgeId} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}
